@@ -1,0 +1,109 @@
+---
+title: "Appendix D5 - Tract Boundary Exploration"
+author: "Nathan Garcia-Diaz"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: lumen
+    toc: TRUE
+    toc_float: 
+      toc_collapsed: TRUE
+    toc_depth: 3
+    number_sections: TRUE
+---
+
+# Packing Preparation and Importing Datasets 
+The following chunk preforms the following tasks:
+
+    * makes a list of packages names needed throughout the document 
+    * Makes Oregon States Counties Map
+    * Makes Marion County Census Tracts Map
+        * Map 1: Census Tracts in 2015
+        * Map 2: Census Tracts in 2020
+  
+```{r, echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+# importing packages
+package_lst = c("tidyverse", "maps", "sf", 
+                "readxl", # importing excel files
+                "imputeTS", # removes na with "na_remove()"
+                "janitor", # creates clean column names 
+                # utilized to obtain acs data frames, spatial files, and map making
+                "tigris", "tidycensus", "tmap", "ggpubr", "here") 
+#lapply(package_lst, install.packages, character.only = TRUE)
+lapply(package_lst, library, character.only = TRUE)
+```
+
+# Creating Map of Oregon Counties
+The following code creates the maps for Oregon Counties.
+```{r, echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+## define the shape of the Oregon counties -- from maps package
+or_counties <- map_data("county", "oregon") %>% select(lon = long, lat, group, id = subregion)
+head(or_counties)
+
+## plot Oregon counties
+ggplot(or_counties, aes(lon, lat, group = group)) +
+  geom_polygon(fill = "white", colour = "grey50") + 
+  coord_quickmap()
+```
+
+# Creating Maps of Marion County Census-Tracts
+The goal for the following code is to create ggplot two objects containing census tracts for Marion County in 2015 and 2020. To achieve this goal the following objective are met:
+
+    * define the census tract year 
+    * pull the shape files for Marion County, from define cenus tract year 
+    * create ggplot object using the shape files from the previous step 
+    * repeat for second year 
+    
+```{r echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+# set year for boundaries 
+this.year = 2015 
+
+# define the shape of Oregon tracts -- from sf
+or_tracts_2015 <- tracts(state = 'OR', county = 'Marion', cb = T, year = this.year)
+head(or_tracts_2015)
+
+# creating the 2015 shape maps 
+map_2015 = ggplot(or_tracts_2015) + geom_sf() + coord_sf()
+
+# set year for boundaries 
+this.year = 2020 
+
+# define the shape of Oregon tracts -- from sf
+or_tracts_2020 <- tracts(state = 'OR', county = 'Marion', cb = T, year = this.year)
+
+head(or_tracts_2020)
+
+# creating the 2015 shape maps 
+map_2020 = ggplot(or_tracts_2020) + geom_sf() + coord_sf()
+```
+
+The following code displays the tract boundary maps for both 2015 and 2020. This map confirms that the difference between the two year is that tracts in 2015 have been split in 2020. By flipping between the two maps, I was able to visually identify areas that have been split. I used ArcGIS Pro to identify the names of census tracts which will be helpful in aggregating census tract data. There are two 7 
+  
+```{r}
+map_2015 = map_2015 + ggtitle("2015 Tracts Boundaries") + theme_classic() 
+
+map_2020 = map_2020 + ggtitle("2020 Tracts Boundaries") + theme_classic()
+
+temp = ggpubr::ggarrange(map_2015, map_2020 # defines the order of the plot
+                     #,labels = c("A", "B") # defines the labels 
+                     ,font.label = list(size=14, color = "black", face = 'plain') # defines label aesthetics 
+                     ,ncol = 2, nrow = 1) # defines the organization of graphs 
+temp
+
+ggsave(filename=here("Outputs", "fig3.png"), plot = temp)
+
+```
+
+The following list demonstrates the relationship between census tracts in 2020 and 2015. The first line is the example relationship between the two years. 
+
+    * **047_2020_tract_01** + **047_2020_tract_01** = **047_2015_tract**
+    1. 010308 + 010309 = 010306
+    2. 002503 + 002504 = 002501
+    3. 001605 + 001606 = 001602
+    4. 001607 + 001608 = 001604
+    5. 000702 + 000703 = 000701
+    6. 002701 + 002702 = 002700
+    7. 002002 + 002001 = 002000
+    
+The following step is to get ACS data from 2020, rather than the previously obtained 2021 data. This assures that the relationship between the variables is maintained. These tracts information will be re-coded in order to meet the the tract boundaries in 2015.
+

@@ -1,0 +1,32 @@
+---
+title: "Meta Data"
+output: html_notebook
+---
+
+Hello Future, 
+
+Marion County TPEP intern. I am making this metadata file that that you are orientated to 
+all the code I had written for my Public Health Capstone Project in SP'23. 
+
+I have tried to make this code as interpretable in the event that you do not have any coding 
+skills. So hopefully, my R comments make sense. But do know that I have a very unique 
+method of coding. 
+
+Organization: 
+  - Code contains the all of the code outlined in the Appendix of my capstone document, 
+      and the associated html files
+  - Data contains both the raw data that I generated prior to the statistical analysis 
+      and the code I generate after Appendix D1
+  - OutPuts contains the tables and figures made across all of the files within Code
+  
+```{r loading initial package}
+install.packages("here")
+library(here)
+
+# this package creates paths relative to the top-level directory
+# this makes organizing workflows easier
+# additioanlly, it allows for code to be immediately used by others upon download 
+# or at least this is the intention of the code
+here()
+```
+

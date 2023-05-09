@@ -1,0 +1,150 @@
+---
+title: "Appendix D2 - Creating Descriptive Summary Table"
+author: "Nathan Garcia-Diaz"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: lumen
+    toc: TRUE
+    toc_float: 
+      toc_collapsed: TRUE
+    toc_depth: 3
+    number_sections: TRUE
+---
+
+The purpose of this document is to describe the process of making the Population Statistics of Marion County Table. This is standard practice when talking working with population data. 
+
+# Packing Preparation and Importing Datasets 
+
+The following chunk preforms the following tasks:
+
+    * makes a list of packages names needed throughout the document 
+    * loops through the list, and imports each of the packages 
+    * imports complete_tract_data, created in Appendix A 
+    * defines the desired background for a ggplot figure
+
+```{r preparation, echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+# the following code exhibits data exploration
+package_lst = c("tidyverse", "gtsummary", "GGally", "broom", "bestglm", "caret", "webshot2", "here") # include other packages for logistic regression and data exploration
+#lapply(package_lst, install.packages, character.only = TRUE)
+lapply(package_lst, library, character.only = TRUE)
+
+# importing data from counts and ratios data
+complete_tract_data = read_csv(here("Data", "GenerateData", "complete_tract_data.csv"))
+
+# defining clear ggplot background 
+theme_clear = theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+```
+
+# Data Exploration 
+This portion can be more developed, I am just not exactly sure what to show. Below there is information about the structure of the data frame and basic summary statistics. The following output provides information about the structure of the data set. Each row represents the a column within the *complete_tract_data* data set, and as expected the each row is labeled as *num*. This verifies that the R software is interpreting each column as containing a numeric data type. 
+```{r Data Exploration, echo = T, warnings=FALSE, echo = T, message = FALSE,  warnings=FALSE}
+str(complete_tract_data)
+
+# since GEOID should be treated as a character for the safety of the data
+# however this is more of a procautious is not needed for this moment
+```
+
+The following output displays a pairwise plot for the prevalence of tobacco-related health conditions. The pairwise plot provides multiple two-way intersection of all variables within the table. The Correlation represents the strength of correlation between two variables, and the subsequent asterisks represents the p-value derived statistical significant. See Appendix B for more information about p-values. For the purpose of interpreting the pairwise plot, statistical insignificant relationships do not have an asterisk. 
+
+```{r}
+temp = complete_tract_data %>% 
+  select(matches("CrudePrev"))
+###### making pair wise plots  
+ggpairs(temp, 
+        columnLabels = c("Smoking %","COPD %", "CHD %", "Asthma %", "Stroke %", "Depression %"), # defines column labels
+        title = "Pairwise of Tobacco-Related Health Outcomes" ) + # creates overall title
+  labs(subtitle="Center for Disease Control - PLACES", # defines subtitle
+       caption = "COPD = Chronic Obstructed Pulmonary Disease | CHD = Chronic Heart Disease", # defines the caption
+       ) + 
+  theme_clear
+```
+
+
+# Descriptive Statistics
+The following code create a descriptive statistics table for Marion County 2020. I have attached a link for additional resources for making a summary of regression table using gt_summary(). 
+
+It should be noted the number of variables may decrease in order to reduce future model complexity (e.i., reducing the number of education categories to make it a everyone with more than an associate degree and reducing the age categories by calculating the mean age). The preference for simpler models. 
+
+
+The code renames the variables to that the final table is easier to read. The descriptive table displays information about the Mean and Standard Deviation As a reminder, the mean refers to the average, which is $$Mean = \frac{\text{Sum of All Terms}}{\text{Number of All Terms}}$$
+
+The Standard Deviation (SD) refers to the distribution of the data around the mean. In the table SD can be found within parenthesis. When interpreting the SD, one SD above the mean (i.e., add the SD to the mean) represents the range where 34.1% of the data lies within, while one SD below the mean (i.e., subtract the SD from the mean) represents another rather where 34.1% of the data lies. Therefore, ± one SD from the mean describes 68.2% of the entire data set. For more information about SD please refer to the following link (https://en.wikipedia.org/wiki/Standard_deviation). Below is the equation for standard deviation:
+
+    * x represents an individual data point
+    * x̄ represents the mean of the data set
+    * n represents the number of data points within the data set
+    * individual data points for this data set is the number of tracts
+
+$$ \text{Standard Deviation} = \sqrt{\frac{\sum (x - x̄)^2}{1-n}}$$
+
+
+```{r descriptive statistics, result = 'hide', echo = T, message = FALSE,  warnings=FALSE}
+# make temporary data frame removing the columns that do not need to be 
+temp = complete_tract_data %>% 
+  select(-GEOID) %>% 
+  mutate(    
+    "Estimate Count of Cigarette Smokers" = smoking_counts,
+    "Tobacco Retailer Density Per Tract" = trd_count,
+    "Population Density (person/km^2)" = pop.density,
+    "Males" = total.males,
+    "Females" = total.females, 
+    "White Individuals (NHL)" = race.white.NHL,
+    "Black Individuals (HL)" = race.black.HL,
+    "Native American Individuals (HL)" = race.nativeamerican.HL,
+    "Asian Individuals (HL)" = race.asian.HL,
+    "Hispanic Individuals (HL)" = race.hispanic.alone,
+    "Other Races Individuals (HL)" = race.other.HL,
+    "Multiracial Individuals (HL)" = race.multiracial.HL,
+    "Population with No Income" = income.none,
+    "Popultion with Income Less than $25,000" = income.less.25k,
+    "Population with Income Between $25,000 and $49,999" = income.between.25kand49.9k,
+    "Population with Income Between $50,000 and $74,999" = income.between.50kand74.9k,
+    "People with Income Greater than $75,000" = income.greater.75k,    
+    "People Younger than 5 yrs" = age.under17,
+    "People Between 18 and 24 yrs" = ages.between.18and24,
+    "People Between 25 and 44 yrs" = ages.between.25and44,
+    "People Between 45 and 64 yrs" = ages.between.45and64,
+    "People Older than 65 yrs" = ages.over65,
+    "Insured People" = total.people.insured,
+    "People on Public Assistance" = total.people.publicassistance,
+    "Individuals with Less than High School Education" = education.less.highschool,
+    "Individuals with High School Education or Some College" = education.highschool.or.associates,
+    "Individuals with Undergraduate or Graduate Education" = education.undergrad.or.grad,
+    "Insured People" = total.people.insured,
+    "People on Public Assistance" = total.people.publicassistance
+  ) %>% 
+  select("Estimate Count of Cigarette Smokers":"People on Public Assistance")
+
+# making the summary table 
+table = temp %>% tbl_summary(statistic = list(all_continuous() ~ "{mean} ({sd})")) %>% 
+  modify_header(label ~ "**Demographics**") %>% 
+  as_gt() %>%
+  gt::tab_header(title = "Table 2. Census Tract-Level Demographics", subtitle = "Marion County, 2020") %>% 
+  gt::tab_source_note(gt::md("*Data From American Community Survey and Center for Disease Control's PLACES*")) %>% 
+  gt::tab_source_note(gt::md("*NHL = Not including Hispanics or Latinos*")) %>% 
+  gt::tab_source_note(gt::md("*HL = Including Hispanics or Latinos*"))
+
+
+table
+# https://stackoverflow.com/questions/64528848/adding-customized-options-to-gtsummary-tables#:~:text=To%20add%20titles%20and%20other,add%20them%20using%20gt%20functions.
+```
+
+When making the word document to display the code, the table prints awkwardly and decreasing the overall legibility.  
+```{r, result = 'hide', echo = T, message = FALSE,  warnings=FALSE}
+# making a png of the summary table 
+table %>% 
+  gt::gtsave(filename = here("Outputs", "population_descriptive_statistics.png")) # save table as image
+```
+
+
+# Summary Table for Data Analysis 
+This portion is required to create a glimpse of for Student Scholarship Recognition Data (SSRD) Presentation. A screenshot of the following output will be placed into the slide show. 
+```{r}
+df_variables_for_data_analysis = complete_tract_data %>% 
+  select(trd_count, pop.density, matches("race.|income.|_CrudePrev"), smoking_counts)
+
+str(df_variables_for_data_analysis)
+```
+

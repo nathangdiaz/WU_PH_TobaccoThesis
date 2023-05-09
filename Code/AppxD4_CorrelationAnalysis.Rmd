@@ -1,0 +1,224 @@
+---
+title: "Appendix D4 - Correlation Analysis"
+author: "Nathan Garcia-Diaz"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: lumen
+    toc: TRUE
+    toc_float: 
+      toc_collapsed: TRUE
+    toc_depth: 3
+    number_sections: TRUE
+---
+
+# Packing Preparation and Importing Datasets 
+The following chunk preforms the following tasks:
+
+    * makes a list of packages names needed throughout the document 
+    * loops through the list, and imports each of the packages 
+    * imports the complete_tract_data, which contains the prevalence for a vierty of health conditions 
+    
+```{r preparation, echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+# the following code exhibits data exploration
+package_lst = c("tidyverse", "gtsummary", "GGally", "broom", "bestglm", "caret", "webshot2", "here") # include other packages for logistic regression and data exploration
+#lapply(package_lst, install.packages, character.only = TRUE)
+lapply(package_lst, library, character.only = TRUE)
+
+# importing data from counts and ratios data
+complete_tract_data = read_csv(here("Data", "GenerateData", "complete_tract_data.csv"))
+
+# defining clear ggplot background 
+theme_clear = theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+```
+
+# Correlation Analysis 
+
+## Understanding Simple Linear Regression
+Simple Linear Regression (SLR) allows to determine the relationship between two numeric variables. While multiple statistical methods can be used to determine the relationship between two numeric variables, I chose to use SLM because this method visualizes the relationship between two variables and interpretation of the results revolves around understanding three different values (i.e., correlation coefficient, R-squared, and p-value). Fundamentally, the SLM is the process of determining the linear equation for a scatter plot; scatter plot is the visual representation of plotting two numeric variables on a graph. The linear equation has been introduced throughout high school math courses, but for a brief reminder it is written as $y = mx + b$. Below is a list summarizing the components of the linear equation:
+
+    * X is the input value, and for the context of this analysis, it will always been the tract-level prevalence of adult cigarette smoking 
+    * Y is the output value, and for the context of this analysis, will rotate between 5 different healthoutcomes
+    * M is the correlation coefficient, which is also known as the slope 
+    * B is the y-intercept, or the point where the line meets the y-axis. Often times the y-intercept does not have real world interpretations, and therefore, it often ignored
+
+When interpreting the results of a linear equation it is important to first examine the p-value. Previously, the p-value was described as the threshold determines the statistical relevance of a given variable. Using the same threshold of 0.05, the p-value preforms a similar function, which is to determine the validity of the SLR model. As a reminder, the p-value describes the the probability of observing test results which stem from an inherent relationship between variables rather than due to random chance. 
+
+The correlation coefficient, also known as the slope, determines the the amount of change along the Y-axis for every change along the X-axis. For example, *for every 1% increase in smoking prevalence in a census tract, there is an expect increase of X to the associated health outcome, where X represents the slope found in the equation.* Most importantly, there is a **large** limitations in results interpretation. Since census tract information inherently depicts population rather than individuals, the notion of Ecological Fallacy address. The Ecological Fallacy is the logical error made when applying the conclusions of aggregated data about a population towards an individual. For example, "if a specific neighborhood has a high crime rate, one might assume that any resident living in that area is more likely to commit a crime." Therefore, I cannot say individuals who smoking are more likely to develop Chronic Obstructed Pulmonary Disease (COPD), however I can say that populations with higher smoking prevalence should expect an increase in COPD. 
+
+Lastly, the R-squared value is considered a metric to determine the effectiveness of a model in describing the data. The R-square can be interpreted as a percentage about how much of the data the model can account for. Thus, a value closer to 1, or 100%, would be most ideal, however it is often achievable. 
+
+When reading the following logistical regression tables, the reader should first examine the p-values if the SLR model is statistically significant, examine the correlation coefficient to better understand the strength of the relationship, and then, examine the R-squared value to determine the overall effectiveness of the model. 
+
+## Correlation Analysis
+The following achieves the following goals: 
+
+    (1) preforms linear regression across specified PLACES health variables
+    (2) creates individual graphs for the containing the scatter plot and simple linear model (SLM) equations
+    (3) create a larger ggplot object containing multiple scatter plots
+
+```{r correlation analysis, echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+# simplifying the data to include health data only 
+temp = complete_tract_data
+temp = temp %>% select(matches("CrudePrev"))
+
+###### making scatter plots with SLM equations
+## create empty list for plots ##
+plots <- vector('list', (length(colnames(temp)) - 1))
+
+## creates loops for creating ggplot objects for desired variables ##  
+for (i in 2:ncol(temp)) { 
+  # idexes the ggplot object into the previously defined list
+  plots[[i]] = local({
+    # brings the i variable from outside the loop (this did not work without it)
+    i = i
+    # makes the linear equation to be fitted for each variable 
+    lm_eqn = function(temp){
+    # define the equation being used 
+    m = lm(temp[[i]] ~ temp[[1]], temp);
+    # the text in the final equation can be editing in the following line of code
+    eq = substitute(italic(`Adult Smoking Prevalence (%)`) == a + b %.% italic(`TRD`)*","~~italic(r)^2~"="~r2*","~~italic("p")~"="~p,  
+         list(a = format(unname(coef(m)[1]), digits = 2),
+              b = format(unname(coef(m)[2]), digits = 2),
+             r2 = format(summary(m)$adj.r.squared, digits = 3),
+              p = format(signif(as.numeric(glance(m)$p.value), 3))
+             )
+         )
+    as.character(as.expression(eq));
+    
+   # print(plot(m)) -- produces diagnositc plots
+}
+    # create temp ggplot object that has the details that are shared amongst all graphs
+    temp_plot <- ggplot(data = temp, aes(x = CSMOKING_CrudePrev, y = temp[[i]] )) +
+      geom_point() + # creates scatter plot
+      xlim(10,25) + # define x axis variables
+      geom_smooth(method="lm", colour="red", size=0.5, se = FALSE) + # preforms SLM
+      geom_text(x = 17, y = 1, label = lm_eqn(temp), parse = TRUE) + # adds the SLM equation 
+      theme_clear + # preferred theme for plot
+      theme(axis.title.x = element_blank(), # remove the x-axis label from appearing in individual graphs
+            axis.text.y=element_text(size=9) # changes the size of y-axis label
+            ) 
+}) }
+
+ ## removes the empty positions in the list ## 
+plots = compact(plots)
+
+ ## adds the additional lists for annotations for the rest of the plost ## 
+# COPD(%) annotations
+plot_a = plots[[1]] + 
+  labs(y = "COPD (%)") + # creates the y-axis label
+  ylim(0, 10) # defines y axis limits
+
+# Asthma (%) annotations
+plot_b = plots[[3]] +
+  labs(y = "Asthma (%) ") +# creates the y-axis label
+  ylim(0, 15) # defines y axis limits
+
+# CHD (%) annotations 
+plot_c = plots[[2]] +
+  labs(y = "CHD (%) ") + # creates the y-axis label
+  ylim(0, 10) # defines y axis limits
+
+# stroke (%) annotations
+plot_d = plots[[4]] +
+  labs(y = "Stroke (%) ") +# creates the y-axis label
+  ylim(0, 5) # defines y axis limits
+
+# depression (%) annotations
+plot_e = plots[[5]] +
+  labs(y = "Depression (%) ") + # creates the y-axis label
+  ylim(0, 30) # defines y axis limits
+
+ ## Combing Plots Together - PLOT 1## 
+fig4ab = ggpubr::ggarrange(plot_a, plot_b # defines the order of the plot — COPD and Asthma
+                     ,labels = c("A", "B") # defines the labels 
+                     ,font.label = list(size=14, color = "black", face = 'plain') # defines label aesthetics 
+                     ,ncol = 1, nrow = 2) # defines the organization of graphs 
+# annotate plot 1
+fig4ab = ggpubr::annotate_figure(p = fig4ab # defines the plot that will be organized
+                ,top = "Figure 4a. Correlations Between Cigarette Smoking and Tobacco-related Pulmonary Prevalence" # the main title of the plot
+                ,bottom = "Adult Cigerate Smoking Prevalence (%)")# defines the shared x-axis
+fig4ab
+
+ggsave(filename=here("Outputs", "fig4ab.png"), plot = fig4ab)
+
+ ## Combing Plots Together - PLOT 1## 
+fig4cd = ggpubr::ggarrange(plot_c, plot_d # defines the order of the plot - CHD and Stroke
+                     ,labels = c("C", "D") # defines the labels 
+                     ,font.label = list(size=14, color = "black", face = 'plain') # defines label aesthetics 
+                     ,ncol = 1, nrow = 2) # defines the organization of graphs
+fig4cd = ggpubr::annotate_figure(p = fig4cd # defines the plot that will be organized
+                ,top = "Figure 1b. Correlations Between Cigarette Smoking and Tobacco-related Condition Prevalence" # the main title of the plot
+                ,bottom = "Adult Cigerate Smoking Prevalence (%)")# defines the shared x-axis 
+fig4cd
+
+ggsave(filename=here("Outputs", "fig4cd.png"), plot = fig4cd)
+
+  ## Generating Plot ##
+fig4e = ggpubr::ggarrange(plot_e # defines the order of the plot
+                     ,labels = c("E") # defines the labels 
+                     ,font.label = list(size=14, color = "black", face = 'plain') # defines label aesthetics 
+                     ,ncol = 1, nrow = 1)
+fig4e = ggpubr::annotate_figure(p = fig4e # defines the plot that will be organized
+                ,top = "Figure 1c. Correlations Between Cigarette Smoking and Tobacco-related Depression Prevalence" # the main title of the plot
+                ,bottom = "Adult Cigerate Smoking Prevalence (%)")# defines the shared x-axis 
+fig4e
+
+ggsave(filename=here("Outputs", "fig4e.png"), plot = fig4e)
+```
+
+Four out of the five SLR models, the only model without a correlation occurs between smoking cigarettes and CHD (*R^2* = `r signif(0.00727, 3)`; *p* = `r signif(0.239, 3)`). Based on the Correlation Coefficient (CC), the two most correlated variables are Adult Cigarette Smoking Prevalence and Depression (*CC* = `r signif(0.31, 3)`;*R^2* = `r signif(0.577, 3)`; *p* < 0.05). From most to least correlated, the subsequent correlated variables are Chronic Obstructive Pulmonary Disease (COPD) (*CC* = `r signif(0.26, 3)`;*R^2* = `r signif(0.511, 3)`; *p* < 0.05), Asthma (*CC* = `r signif(0.18, 3)`;*R^2* = `r signif(0.711, 3)`; *p* < 0.05), and Stroke (*CC* = `r signif(0.078, 3)`;*R^2* = `r signif(0.227, 3)`; *p* < 0.05). All three of these variables have complex etiology with triggers varying widely, and smoking alone should not, and as demonstrated by the second graph below, does not explain the graphic vary well; therefore, I expected these to have weak correlations. With even the most correlated variables having a CC less than 0.5, can be considered to be a weak correlation.
+
+## Initial Investigation between Adult Cigarette Smoking Prevalence and Tobacco Retailer Density - Liner Regression
+
+```{r AdSP and TRD, echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+# making temporary data set that only contains the primary input and output variables
+temp = complete_tract_data
+temp = temp %>% 
+  mutate("Adult Cigerate Smoking Prevalence Per Tract (%)" = CSMOKING_CrudePrev,
+         "Tobacco Retailer Density" = trd_count) %>% 
+  select("Adult Cigerate Smoking Prevalence Per Tract (%)", "Tobacco Retailer Density")
+
+# making a function that is able to spit out the equation for a SLM
+lm_eqn = function(temp){
+    # define the equation being used 
+    m = lm(temp$`Adult Cigerate Smoking Prevalence Per Tract (%)` ~ temp$`Tobacco Retailer Density`, temp);
+    # the text in the final equation can be editing in the following line of code
+    eq = substitute(italic(`Adult Smoking Prevalence (%)`) == a + b %.% italic(`TRD`)*","~~italic(r)^2~"="~r2*","~~italic("p")~"="~p, 
+         list(a = format(unname(coef(m)[1]), digits = 2),
+              b = format(unname(coef(m)[2]), digits = 2),
+             r2 = format(summary(m)$r.squared, digits = 3),
+              p = format(signif(as.numeric(glance(m)$p.value), 3))
+             )
+         )
+    as.character(as.expression(eq));
+}
+
+# defines the variable that are going to be used above 
+m = lm(temp$`Adult Cigerate Smoking Prevalence Per Tract (%)` ~ temp$`Tobacco Retailer Density`, temp)
+adj.r.squared = glance(m)$adj.r.squared
+p.value = glance(m)$p.value
+
+# print diagnostic plots 
+# plot(m)
+
+# making a scatter plot with the primary variables and the equation
+plt = ggplot(temp, aes(x = temp$`Tobacco Retailer Density`, y = temp$`Adult Cigerate Smoking Prevalence Per Tract (%)`)) + 
+  geom_point() +
+  geom_smooth(method="lm", colour="red", size=0.5, se = FALSE) + 
+  geom_text(x = 8, y = 5, label = lm_eqn(temp), parse = TRUE) +
+  labs(title = " Simple Linear Regression - Examining the Associations Between TRD and AdSP") +
+  ylab("Adult Cigerate Smoking Prevalence Per Tract (%)") + 
+  xlab("Tobacco Retail Density (TRD)") +
+  ylim(0,25) +
+  theme_clear 
+
+plt
+
+ggsave(filename=here("Outputs", "Figure5.png"), plot = plt)
+```
+
+The following code formats the creates a liner regression model in order to determine the relationship between the the AdSP and TRD. The model revealed an insignificant relationship between adult smoking prevalence and tobacco retailer density, (*R^2* = `r signif(adj.r.squared, 3)`; *p* = `r signif(p.value, 3)`). The low Adjusted R-squared and insignificant p-value can be explained by other neighborhood-level demographic characteristics, such as socioeconomic status and racial/ethnic minorities. The reasoning that these variables can explain the relationship is because there is a long history of targeted advertisement in neighborhoods with high proportion of historically marginalized populations. If there is a statistically significant relationship between these variables of interest, the results from this model imply and the historical context of the targeted tobacco marketing, imply that the inclusion of other neigborhood demographic variables are critical to describing the relationship.
+
+While a non-linear model could have been fitted because I am looking for a baseline associated with easy interpretation, a SLR model was choose to create an initial exploration between the primary variables. Since the same regression is being applied, the interpretation of the equation is the same. *For each additional retailer within a census tract, there is an expect increase of 0.41% of a tract's adult cigarette smoking prevalence*. 

@@ -1,0 +1,744 @@
+---
+title: "Appendix D1 - Data Cleaning"
+author: "Nathan Garcia-Diaz"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: lumen
+    toc: TRUE
+    toc_float: 
+      toc_collapsed: TRUE
+    toc_depth: 3
+    number_sections: TRUE
+    
+---
+
+The following document aims to achieve multiple goals:
+
+    * Automate the process for obtaining data from the American Community Survey (ACS) in order to get tract-level socioeconomic data for Marion County in 2020
+    * Import Center for Disease Control's PLACES data for tract-level health prevalence 
+    * Import Tobacco Retailer Density data
+    * Each data set will be appropriately cleaned and wrangled data 
+    * Join all data sets together to form a final data set ready for exploration and analysis
+
+# Packing Preparation and Importing Datasets 
+The following chunk preforms the following tasks:
+
+    * makes a list of packages names needed throughout the document 
+    * loops through the list, and imports each of the packages 
+    * obtain and install an API to obtain ACS data
+    * import the PLACES and OHA data sets
+    
+An API can be thought of as a digital key used to obtain data from a website. The ACS API is a fast and easy process. 
+
+```{r preparation, echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+# importing packages"
+package_lst = c("tidyverse", # basic tools 
+                "readxl", # importing excel files
+                "imputeTS", # removes na with "na_remove()"
+                "janitor", # creates clean column names 
+                # utilized to obtain acs data frames, spatial files, and map making
+                "tigris", "sf", "tidycensus", "tmap", "ggpubr", "here")
+#lapply(package_lst, install.packages, character.only = TRUE)
+lapply(package_lst, library, character.only = TRUE)
+
+# First obtain an API key from https://api.census.gov/data/key_signup.html
+# Once you have an API key load it into your R enivorment so that you can access the ACS data 
+# census_api_key("62bcd353e6fbf79421e6e6ee9070636af46f0f1f", install = TRUE)
+
+# importing data from PLACES
+health = read_csv(here("Data", "RawData", "PLACES_data.csv"))
+
+# importing data from OHA
+trd = read_excel(here("Data", "RawData", "TRO_counts_TableToExcel.xlsx"))
+```
+
+# Cleaning American Community Survey Data
+
+The American Community Survey (ACS) is the source of socioeconomic data at the census tract level.
+This section completes the following goal:
+
+    * obtain ACS data 
+    * define tract area 
+    * feature engineer new variables 
+
+## Retrieving ACS Data
+The goal of this section is to access American Community Survey (ACS) information from 2020 on a verity of factors. Below are the information that I will access from the 1 year estimates. Ideally, I would use the 1 year ACS estimates because an ACS 1-year estimate includes information collected over a 12-month period  (e.g., the 2015 ACS covers the period from January 2015 through December 2015) because it isolated information that could provide additional noise in the data. However, since the 2020 1-year ACS was released as a set of experimental estimates that was not published to the Census API and is in turn not available in 'tidycensus', I will utilize the ACS 5-year estimates. 
+
+Below are the variables used to make the population descriptive summary table, in addition to the obtaining the race and socioeconomic count data for logistic regression. Below are the list of ACS survey questions, (e.i., B02001_001), and I have reorganized the variables into larger categories which would be used into the descriptive summary tables and into logistic regression. For example the category "< $25,000" is derived from income.between.1and9.9k = B06010_004; income.between.10kand14.9k = B06010_005; income.between.15kand24.9K = B06010_006.
+
+    * total.population = B02001_001
+    * Males
+        * total.males = B01001_002
+    * Females
+        * total.females = B01001_026
+    * Number of People Living in Household on public assistance
+        * total.people.publicassistance = B09010_002
+    * Number of People Living with Health Insurance
+        * total.people.insured =  B27010_001 
+    * Housing Tenure (Householder lived in owner-occupied housing units vs Householder lived in renter-occupied housing unit)
+        * housing.owner.occupied = B07013_002  (older B07413_002)
+        * housing.renter.occupied = B07013_003 (older B07413_003)
+    * Race
+        * race.white.NHL = B01001H_001
+        * race.black.HL = B01001B_001
+        * race.nativeamerican.HL = B01001C_001
+        * race.asian.HL = B01001D_001
+        * race.pacificislander.HL = B01001E_001
+        * race.other.HL = B01001F_001
+        * race.multiracial.HL = B01001G_001
+        * race.hispanic.alone = B01001I_001
+    * Income (INDIVIDUAL INCOME IN THE PAST 12 MONTHS (IN 2020 INFLATION-ADJUSTED DOLLARS); 15 yrs and older)
+        * income.none = B06010_002
+        * < $25,000
+            * income.between.1and9.9k = B06010_004
+            * income.between.10kand14.9k = B06010_005
+            * income.between.15kand24.9K = B06010_006
+        * $25,000 to $49,999
+            * income.between.25kand49.9k = B06010_007
+            * income.between.34kand49.9K = B06010_008
+        * $50,000 to $74,999
+            * income.between.50kand64.9k = B06010_009
+            * income.between.65kand74.9k = B06010_010
+        * $75,000 <
+            * income.between.greater75k = B06010_011
+    * Educational Attainment
+        * less than high school = B06009_002
+        * completed high school or equivalent = B06009_003
+        * some college or associates = B06009_004
+        * completed undergrad = B06009_005
+        * completed graduate school = B06009_006
+    * Ages 
+        * ages under 17yr
+            * Under 5
+                * ages.males.under5 = B01001_003
+                * ages.females.under5 = B01001_027
+            * Between 5 to 9
+                * ages.males.5to9 = B01001_004
+                * ages.females.5to9 = B01001_028
+            * Between 10 to 14
+                * ages.males.10to14 = B01001_005
+                * ages.females.10to14 = B01001_029
+            * Between 15 to 17
+                * ages.males.15to17 = B01001_006
+                * ages.females.15to17 = B01001_030
+        * ages.between.18and24
+            * Between 18 and 19 
+                * ages.males.18to19 = B01001_007
+                * ages.females.18to19 = B01001_031
+            * is 20
+                * ages.males.20 = B01001_008
+                * ages.females.20 = B01001_032
+            * is 21 
+                * ages.males.21 = B01001_009
+                * ages.females.21 = B01001_033
+            * Between 22to24
+                * ages.males.22to24 = B01001_010
+                * ages.females.22to24 = B01001_034
+        * 25to44
+            * Between 25 to 29
+                * ages.males.25to29 = B01001_011
+                * ages.females.25to29 = B01001_035
+            * Between 30 to 34
+                * ages.males.30to34 = B01001_012
+                * ages.females.30to34 = B01001_036
+            * Between 35 to 39
+                * ages.males.35to39 = B01001_013
+                * ages.females.34to39 = B01001_037
+            * Between 40 to 44
+                * ages.males.40to44 = B01001_014
+                * ages.females.40to44 = B01001_038
+        * 45to64 
+            * Between 45 to 49
+                * ages.males.45to49 = B01001_015
+                * ages.females.45to49 = B01001_039
+            * Between 50 to 54
+                * ages.males.50to54 = B01001_016
+                * ages.females.50to54 = B01001_040
+            * Between 55 to 59
+                * ages.males.55to59 = B01001_017
+                * ages.females.55to59 = B01001_041
+            * Between 60 to 61
+                * ages.males.60to61 = B01001_018
+                * ages.females.60to61 = B01001_042
+            * Between 62 to 64
+                * ages.males.62to64 = B01001_019
+                * ages.females.62to64 = B01001_043
+        * Over 65 
+            * Between 65 to 66
+                * ages.males.65to66 = B01001_020
+                * ages.females.65to66 = B01001_044
+            * Between 67 to 69
+                * ages.males.67to79 = B01001_021
+                * ages.females.67to79 = B01001_045
+            * Between 70 to 74 
+                * ages.males.70to74 = B01001_022
+                * ages.females.70to74 = B01001_046
+            * Between 75 to 79
+                * ages.males.75to79 = B01001_023
+                * ages.females.75to79 = B01001_047
+            * Between 80 to 84
+                * ages.males.80to84 = B01001_024
+                * ages.females.80to84 = B01001_048
+            * Over 85
+                * ages.males.over85 = B01001_025
+                * ages.females.over85 = B01001_049
+
+The following are variables that are unable to be added into the data because information is on the block group or state level, rather than at the tract level. These variable could not be included into logistic regression. 
+
+    * queer couples
+        * However, given Lee et al 2016, "Is There a Relationship Between the Concentration of Same-Sex Couples and Tobacco Retailer Density?" demonstrated that there is a weak correlation, I am not concerned with the absence of this data interfering with results. 
+    * number of households (B11001A_002, B11001A_007)
+    
+The following chunk retrieves American Community Survey data. 
+```{r obtaining ACS data, echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+### GOAL: create a data frame that contains demographic American Community Survey data 
+
+# define the year of interest
+this.year = 2020
+
+# define census spatial boundaries
+census.geography = "tract"
+
+# pull data from the desired ACS year -- if I wanted one year estimates use "acs1"
+# when 1 year estimates come out use "acs1"
+variables = load_variables(year = this.year, dataset = "acs5", cache = TRUE)
+
+# give 5 year estimates for the variables defined above
+# the following gets ACS data and puts it into a variable called demographics
+demographics = get_acs(geography = census.geography, year = this.year,
+                  state = "OR", county = "Marion", geometry = TRUE,
+                  variables = c(acs_population = "B02001_001", 
+                                # Sex
+                                total.males = "B01001_002",
+                                total.females = "B01001_026",
+                                # housing tenure
+                                housing.owner.occupied = "B07413_005",
+                                housing.renter.occupied = "B07413_006",
+                                # individuals with health insurance
+                                total.people.insured =  "B27010_001",
+                                # individuals living on public assistance
+                                total.people.publicassistance = "B09010_002",
+                                # Race
+                                race.white.NHL = "B01001H_001",
+                                race.black.HL = "B01001B_001",
+                                race.nativeamerican.HL = "B01001C_001",
+                                race.asian.HL = "B01001D_001",
+                                race.pacificislander.HL = "B01001E_001",
+                                race.other.HL = "B01001F_001",
+                                race.multiracial.HL = "B01001G_001",
+                                race.hispanic.alone = "B01001I_001",
+                                # income 
+                                income.none = "B06010_002",
+                                income.between.1and9.9k = "B06010_004",
+                                income.between.10kand14.9k = "B06010_005",
+                                income.between.15kand24.9K = "B06010_006",
+                                income.between.25kand49.9k = "B06010_007",
+                                income.between.34kand49.9K = "B06010_008",
+                                income.between.50kand64.9k = "B06010_009",
+                                income.between.65kand74.9k = "B06010_010",
+                                income.greater75k = "B06010_011",
+                                # educational attainment 
+                                education.less.highschool = "B06009_002",
+                                education.highschool = "B06009_003",
+                                education.associates = "B06009_004",
+                                education.undergrad = "B06009_005",
+                                education.graduate = "B06009_006",
+                                # ages 
+                                ages.males.under5 = "B01001_003", 
+                                ages.females.under5 = "B01001_027",
+                                ages.males.5to9 = "B01001_004",
+                                ages.females.5to9 = "B01001_028",
+                                ages.males.10to14 = "B01001_005",
+                                ages.females.10to14 = "B01001_029",
+                                ages.males.15to17 = "B01001_006",
+                                ages.females.15to17 = "B01001_030", 
+                                ages.males.18to19 = "B01001_007",
+                                ages.females.18to19 = "B01001_031",
+                                ages.males.20 = "B01001_008",
+                                ages.females.20 = "B01001_032",
+                                ages.males.21 = "B01001_009",
+                                ages.females.21 = "B01001_033",
+                                ages.males.22to24 = "B01001_010",
+                                ages.females.22to24 = "B01001_034",
+                                ages.males.25to29 = "B01001_011",
+                                ages.females.25to29 = "B01001_035",
+                                ages.males.30to34 = "B01001_012",
+                                ages.females.30to34 = "B01001_036",
+                                ages.males.35to39 = "B01001_013",
+                                ages.females.34to39 = "B01001_037", 
+                                ages.males.40to44 = "B01001_014",
+                                ages.females.40to44 = "B01001_038",
+                                ages.males.45to49 = "B01001_015",
+                                ages.females.45to49 = "B01001_039",
+                                ages.males.50to54 = "B01001_016",
+                                ages.females.50to54 = "B01001_040",
+                                ages.males.55to59 = "B01001_017",
+                                ages.females.55to59 = "B01001_041",
+                                ages.males.60to61 = "B01001_018",
+                                ages.females.60to61 = "B01001_042",
+                                ages.males.62to64 = "B01001_019",
+                                ages.females.62to64 = "B01001_043",
+                                ages.males.65to66 = "B01001_020",
+                                ages.females.65to66 = "B01001_044",
+                                ages.males.67to79 = "B01001_021",
+                                ages.females.67to79 = "B01001_045",
+                                ages.males.70to74 = "B01001_022",
+                                ages.females.70to74 = "B01001_046",
+                                ages.males.75to79 = "B01001_023",
+                                ages.females.75to79 = "B01001_047",
+                                ages.males.80to84 = "B01001_024",
+                                ages.females.80to84 = "B01001_048",
+                                ages.males.over85 = "B01001_025",
+                                ages.females.over85 = "B01001_049")
+                  )
+
+# creating tidy data 
+tidy_tracts = demographics %>%
+  as.data.frame() %>% # convert from spatial data to data frame, this allows for easier joininh between data sets 
+  select(GEOID, variable, estimate) %>% # selecting the variables of interest
+  ### GEOOID = contains the tractFIPS 
+  ### variable = contains the previously selected ACS questions 
+  ### estimate = contains the estimated counts for given ACS question
+  spread(variable, estimate) # convert the shape of the data frame so that it is in a form easy for analysis
+
+colnames(tidy_tracts)
+```
+
+I consulted with Professor Nichole Iroz-Elrado to find a variable in order to account for urbanity. The necessity to account for urbanity stems from the large variation of rural and urban areas within Marion County. Since including population and another urbanity variable would leave the model susceptible to multicolinearity, Dr. Iroz-Elrado concluded with using a different variable widely utilized in Urban Planning, $\text{Tract-level Population Density} = \dfrac{\text{Tract Population}}{\text{km}^2 \text{ of Tract}}$. 
+
+Multicolinearity refers to when predictor variables in a multiple regression model can be linearly predicted from the other variables with a substantial degree of accuracy. When multicolinerarity occurs, the intrinsic relationship amongst variables creates for inaccurate models that violate logistic regression assumptions. 
+
+The following chunk obtains the obtains the GEOID for every tract within Marion County, and the area of land and water for each tract. 
+
+```{r obtaining tract area, echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+# getting the area of census tracts, this variable is a required for defining population density (number of people / km^2)
+# land area is an area measure providing the size in squared meters (https://www.census.gov/quickfacts/fact/note/US/LND110210#:~:text=Land%20area%20%2D%20an%20area%20measurement,MAF%2FTIGER%20Database%22).)
+# I am assuming the water area is the same units as land area
+area = tigris::tracts(state = "OR", county = "Marion", cb = FALSE, class = "sf") %>% 
+  as.data.frame() %>% # converting spatial data into a data frame, this allows for easier joining between other data sets
+  select(GEOID, ALAND, AWATER)
+        # GEOID = the unique identification number for a cenus tract 
+        # ALAND = the area of land in m^2
+        # AWATER = the area of water in m^2 
+```
+
+The area data frame (i.e., data frame entitled 'area') joined back with the original acs data frame, (i.e., data frame entitled 'tidy_tracts'). Therefore the 'tract_data' data frame contains both ACS socioeconomic counts and area.
+```{r joining area and ACS data, echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+# preform left join between ACS demographic data and Tobacco Retailer Density
+tract_data = area %>% left_join(tidy_tracts, by = c("GEOID"))
+```
+
+## Feature Engineering
+Feature Engineering pertains the process used to create additional variables using variables found within the data frame. The list below demonstrates the variables which will be featured engineered. An abbreviated list of the novel features mirrors the one shown within the section entitled *Retrieving ACS Data*. In addition to this list, the following chunk defines to the population density as previously describe in the prior section entitled *Retrieving ACS Data*. After the following chunk creates the 'acs_data' data frame, which contains the feature engineered variables listed below, population density, and other ACS count variables. 
+
+    * Income Brackets
+        * income.less.25k
+        * income.between.25kand49.9k
+        * income.between.50kand74.9k
+        * income.greater.75k
+    * Age Brackets 
+        * age.under17
+        * ages.between.18and24
+        * ages.between.45and64
+        * ages.over65
+    * Educational Attainment Brackets
+        * education.highschool.or.associates
+        * education.undergrad.or.grad
+    * pop.density
+
+```{r feature engineering, echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+# creating usable area: this is because each tract has land but not all tract have water and the new variable will be called useable_area
+
+# creating population density: this variable will be defined as previously described. useable_area is being multiplied by 1000 to convert useable_area (m^2) into pop.density(km^2)
+
+# creating previously defined ACS demographics categories, see the list above
+
+### create useable_area 
+tract_data = tract_data %>% mutate(useable_area = (ALAND - AWATER))
+### create pop.density
+tract_data$useable_area = (tract_data$useable_area / 1000) # convert m^2 to km^2
+tract_data = tract_data %>% add_column(pop.density = 0)  # create empty column, called pop.density, to be filled
+tract_data$pop.density = as.numeric(tract_data$pop.density) # convert, pop.density, into a numeric 
+tract_data$pop.density = tract_data$acs_population/tract_data$useable_area # preform column arithmetic
+  
+# creating other variables categories as previously defined in list above
+acs_data = tract_data %>% 
+  rowwise() %>% # specifies I want to preform row wise aggregation, rather than column aggregation
+  mutate(
+    # create income brackets 
+    ### less than $25,000  
+    income.less.25k = sum(income.between.1and9.9k,  income.between.10kand14.9k,  income.between.15kand24.9K), # new column is a sum row-wise sum of the defined columns 
+    ### $25,000 to $49,999
+    income.between.25kand49.9k = sum(income.between.25kand49.9k,  income.between.34kand49.9K),
+    ### $50,000 to $74,999
+    income.between.50kand74.9k = sum(income.between.50kand64.9k,  income.between.65kand74.9k),
+    ### greater than $75,000
+    income.greater.75k = income.greater75k, 
+    
+    # create age brackets 
+    ### people less than 5yr 
+    age.under17 = sum(ages.males.under5,  ages.females.under5,  
+                     ages.males.5to9,  ages.females.5to9,  
+                     ages.males.10to14,  ages.females.10to14,
+                     ages.males.15to17, ages.females.15to17),
+    ### people between 18 and 24
+    ages.between.18and24 = sum(ages.males.18to19, ages.females.18to19,  
+                               ages.males.20, ages.females.20,  
+                               ages.males.21,  ages.females.21,  
+                               ages.males.22to24,  ages.females.22to24),
+    ### people between 25 and 44 
+    ages.between.25and44 = sum(ages.males.25to29,  ages.females.25to29,  
+                                ages.males.30to34,  ages.females.34to39,  
+                                ages.males.40to44,  ages.females.40to44),
+    ### people between 45 and 64
+    ages.between.45and64 = sum(ages.males.45to49,  ages.females.45to49,
+                                ages.males.50to54,  ages.females.50to54,
+                                ages.males.55to59,  ages.females.50to54,
+                                ages.males.60to61,  ages.females.60to61, 
+                                ages.males.62to64,  ages.females.62to64),
+    ### people over 65 
+    ages.over65 = sum(ages.males.65to66,  ages.females.65to66,
+                      ages.males.67to79,  ages.females.67to79,
+                      ages.males.70to74,  ages.females.70to74,
+                      ages.males.75to79,  ages.females.75to79,
+                      ages.males.80to84,  ages.females.80to84,
+                      ages.males.over85,  ages.females.over85),
+    # education
+    education.highschool.or.associates = sum(education.highschool, education.associates),
+    education.undergrad.or.grad = sum(education.undergrad, education.graduate)
+    ) %>%
+  
+  # this organizes the data in a preferable format
+  # ultimately, all of the variables within the "select()" statement are the variables 
+  # that will appear within the final data frame named "acs_data"
+  select(GEOID, total.people.publicassistance, total.people.insured,
+         # tract level population is critical to calculations in the following step
+         acs_population, 
+         # population density
+         pop.density, 
+         # count of uninsured people and the people receiving public assistance
+         # sex 
+         total.males, total.females,
+         # race -- Hispanic information is not appearing for some reason
+         race.white.NHL, race.black.HL, race.nativeamerican.HL,
+         race.asian.HL, race.pacificislander.HL, race.other.HL,
+         race.multiracial.HL, race.hispanic.alone, 
+         # income 
+         income.none, income.less.25k, income.between.25kand49.9k, 
+         income.between.50kand74.9k, income.greater.75k, 
+         # educational attainment 
+         education.less.highschool, education.highschool.or.associates, education.undergrad.or.grad,
+         # ages
+         age.under17, ages.between.18and24, ages.between.25and44,
+         ages.between.45and64, ages.over65
+         ) %>% 
+  # convert GEOID from INT to CHR, prevent accidental arithmetic on this column
+  mutate_at(c(1), as.character) 
+```
+
+At this point there is one things to note. Data frames entitled *housing.owner.occupied* and *housing.renter.occupied* all contain NA as values. This issues stem from the chunk entitled *obtaining ACS data*. I am not entirely sure what triggering these problem, however I have confirmed that all other variables contain valid numbers. 
+    
+# Cleaning Tobacco Retailer Density (TRD) data, and Joining TRD Data to ACS Data
+
+This section completes the following goal:
+
+    * clean the TRD data
+    * joins data to the ACS data
+
+## Cleaning TRD data
+TRD data originated from OHA and delivered upon request. The density of has been defined using 2020 census tracts.
+```{r cleaning trd data, echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+trd = trd %>% 
+  select(GEOID, COUNT_License_Number) %>% # selecting 
+  mutate_at(c(1), as.character) %>% # convert the FIPS code into a character 
+  mutate(trd_count = COUNT_License_Number) %>% # renaming the column for easier interpretability
+  select(GEOID, trd_count) # selecting preferred columns from tobacco retailer density 
+
+trd = na_replace(trd, 0)
+```
+
+## Joining ACS Data
+We full join acs_data and trd to have have a larger data set that contains all of the information in both table.
+```{r joining trd data and acs data, echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+# preform left join between ACS demographic data and Tobacco Retailer Density
+acs_trd_data = acs_data %>% full_join(trd, by = c("GEOID")) %>%  as.data.frame()
+```
+
+# Refitting 2020 Tracts to 2015 Tracts
+Prior to this point ACS data and TRD data have been spatially organized using the 2020 tract definition. The current step redefines the 'acs_trd_data' to be match the names found in PLACES health data, which is spatial organized using 2015 tract definition. Since the difference between the tract definitions is that a few of 2015 tracts merged together in 2020 and that all variables within 'acs_trd_data' only contains counts, the process of reorganizing 2020 tract to fit the 2015 spatial definitions merely is the sum of counts in two 2020 tracts redefined using the GEOID in 2015. The process is illustrated below:
+
+    * 2015 Tracts <== 2020 Tracts 
+    * 41047010306 <== 41047010308 + 41047010309 
+    * 41047002501 <== 41047002503 + 41047002504 
+    * 41047001602 <== 41047001605 + 41047001606 
+    * 41047001604 <== 41047001607 + 41047001608 
+    * 41047000701 <== 41047000703 + 41047000702 
+    * 41047002700 <== 41047002701 + 41047002702 
+    * 41047002000 <== 41047002002 + 41047002001
+    
+I found it the easiest to change the index names to make the GEOID and based on the indexes take the sums of desired rows. However, this means that I would have to first remove the GEOID column because it contains a characters and these characters, therefore it would be easier to join data together and then convert the entire data frame to fit the 2015 census tracts. The goal of the following chunk comopletes the following goals:
+
+    * convert the index names to match the GEOID
+    * remove the GEOID 
+    * perform column addition and redefine sums as the 2015 census tract GEOIDS
+    * add the GEOID back into the acs_trd_data
+    
+```{r converting tracts, echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+# change the index name to match the GEOID
+rownames(acs_trd_data) <- acs_trd_data$GEOID
+# remove the GEOID column 
+acs_trd_data = acs_trd_data %>% select(-GEOID)
+# aggregate the rows based on labeled index name
+acs_trd_data["41047010306", ] = acs_trd_data["41047010308", ] + acs_trd_data["41047010309", ]
+acs_trd_data["41047002501", ] = acs_trd_data["41047002503", ] + acs_trd_data["41047002504", ]
+acs_trd_data["41047001602", ] = acs_trd_data["41047001605", ] + acs_trd_data["41047001606", ]
+
+acs_trd_data["41047001604", ] = acs_trd_data["41047001607", ] + acs_trd_data["41047001608", ]
+acs_trd_data["41047000701", ] = acs_trd_data["41047000703", ] + acs_trd_data["41047000702", ]
+acs_trd_data["41047002700", ] = acs_trd_data["41047002701", ] + acs_trd_data["41047002702", ]
+
+acs_trd_data["41047002000", ] = acs_trd_data["41047002002", ] + acs_trd_data["41047002001", ]
+# make the index name into a column entitled GEOID 
+acs_trd_data = cbind(GEOID = rownames(acs_trd_data), acs_trd_data)
+rownames(acs_trd_data) = 1:nrow(acs_trd_data)
+```
+
+There are multiple needs (e.i., creating descriptive statistics table, logistic regression on raw count data, logistic regression on standardized population difference tables). The population description table requires count data, and could additionally be used to create the tract-level health outcome comparisons. The population descriptive statistics table provides summarizing basic information about the variables in the data set. The second and third table will be use to make population difference ratios, described later. 
+```{r making two acs_trd_data_counts and acs_trd_data_county_diff_ratios}
+# the acs_trd_data becomes three separates data frames
+
+# acs_trd_data derived from the acs_trd_data (i.e., remains the same)
+acs_trd_data = acs_trd_data 
+# contains the raw counts 
+# used to make the population descriptive summary table 
+
+# acs_trd_data_county_diff_ratios derived from acs_trd_data  
+acs_trd_data_county_diff_ratios = acs_trd_data 
+# contains the standardized population differences
+# variables within this table will be featured engineered 
+
+# acs_trd_data_county_diff_ratios_binary derived from acs_trd_data
+acs_trd_data_county_diff_ratios_binary = acs_trd_data 
+# contains the standardized population differences
+# however racial variables are binary 
+# white, not Hispanic/Latino vs non-white, Hispanic/Latino
+# variables within this table will be featured engineered 
+```
+
+# Feature Engineering Difference Ratios 
+After consultation with Dr. Heather Kitada-Smalley, I am deciding to use calculate  standardized population difference ratios between county level racial ratio and tract level racial ratio, and imputting these as novel variables within the logistic regression model. Given the history of tobacco manufacturers targeting neighborhoods with increased racial/ethnic minority populations and low SES, by looking tracts that differ in respects racial minority and SES populations from the Marion County average, I would be able to more determine if disproportionate representation of racial and socioeconomic prevalence in a census-tract when in comparison to the county-baseline. This is a novel method of to compare the socioeconomic values as predictive values for Adult Cigarette Smoking Prevalence, and to the best of my knowledge has not been preformed elsewhere. 
+
+Population Difference Ratios are defined as $\text{Difference Ratio}= \text{| Proportion of X Demographic in Marion County} - \text{Proportion of X Demographic in a Census Tract |}$
+
+The Standardized Population Difference Ratios are defined as $\text{Standardized Difference Ratios} = \dfrac{\text{Population Difference Ratios}}{\text{Proportion of X Demographic in Marion County}}$
+
+The following chunk feature engineers the variables within ''acs_trd_data_county_diff_ratios'' and 'acs_trd_data_county_diff_ratios_binary'. The race and income columns will contain difference ratio rather than the counts, despite the column names will remaining the same. This makes the the necessary process of feature engineering and the preforming the future logistic regression code more streamline and efficient. The first chunk creates standardized population difference ratios with Marion County being the reference data for each census-tract, while the second chunk creates the same standardized population difference ratios but only between the white and non-white populations.
+
+In order to achieve the first previously define goal for this section, the first chunk completes the following tasks:
+
+    (1) Creates an empty data frame, whose columns contains the 'acs_trd_data' columns containing the strings ".race." or ".income."
+    (2) Define the County Level Baseline Ratios
+    (3) Define the Tract Level Ratios
+    (4) Calculate the Standardized Population Difference Ratios
+    
+```{r creating standarized population difference ratios with county-comparison}
+# creating the difference ratios -- only racial and SES populations 
+### (1) Creating an empty data frame, whose columns contains the 'acs_trd_data' columns containing race. or income
+# creates empty data frame
+marion.baseline = data.frame(matrix(ncol = length(colnames(select(acs_trd_data_county_diff_ratios, matches("race.|income.")))), nrow = 1))  
+# selects column names matching provided strings -- this can be referred to as specified acs_data columns
+colnames(marion.baseline) = colnames(select(acs_trd_data_county_diff_ratios, matches("race.|income.")))
+### (2) Defining County Level Baseline Ratios
+### looping through the specified acs_data columns, and calculating the county-level ratios based off by taking the differences between the sum of counts for specific variables (race or income) and dividing the sum of all tract's population
+for (i in colnames(marion.baseline)) {
+  # confirms I am looping through the column names themselves rather than the column index
+  i = i 
+  # populating the i-th column in marion.baseline with the respective i-th column of acs_data divided by the total population of all tracts put together
+  marion.baseline[,i] = (sum(acs_trd_data_county_diff_ratios[,i])/sum(acs_trd_data_county_diff_ratios$acs_population)) 
+}
+
+### (3) Create Tract Level Ratios -- since counts are no longer needed after this point I am over writing the counts to contain ratios
+# loop through column names
+for (i in colnames(marion.baseline)) {
+  # confirms I am looping through the column names themselves rather than the column index
+  i = i
+  
+  # loop through each census tract
+  for (j in 1:nrow(acs_trd_data_county_diff_ratios)) {
+    # confirms I am looping through each row 
+    j = j
+    # updating the (i,j) cells in acs_data by taking the acs_data counts of a given variable divided by the population of that 
+    acs_trd_data_county_diff_ratios[j,i] = (acs_trd_data_county_diff_ratios[j,i] / acs_trd_data_county_diff_ratios[j,"acs_population"]) 
+  }
+}
+
+### (4) Create the Difference Ratios -- keeping the same column names as before however now race and income columns contain ratios
+# the following overwrite the 
+# loop through column names
+for (i in colnames(marion.baseline)) {
+  i = i
+  
+  # loop through each census tract
+  for (j in 1:nrow(acs_trd_data_county_diff_ratios)) {
+    # confirms I am looping through each row 
+    j = j
+    # updating the (i,j) cells in acs_data by taking the acs_data counts of a given variable divided by the population of that 
+    acs_trd_data_county_diff_ratios[j,i] = ( (abs(marion.baseline[,i] - acs_trd_data_county_diff_ratios[j,i])) / marion.baseline[,i])
+  }
+}
+```
+
+In order to achieve the first previously define goal for this section, the first chunk completes the following tasks:
+
+    (1) Define the minority populations by finding the difference between the tract population and the population of white people within the same census tract
+    (2) Create an empty data frame, whose columns contains the 'acs_trd_data' columns containing the strings ".race." or ".income."
+    (3) Define the County Level Baseline Ratios
+    (4) Define the Tract Level Ratios
+    (5) Calculate the Standardized Population Difference Ratios
+    
+```{r creating binary standarized population difference ratios with county-comparison}
+### (1) initial cleaning to prepare the non-white demographics 
+acs_trd_data_county_diff_ratios_binary = acs_trd_data_county_diff_ratios_binary %>% 
+  mutate(race.not.white.HL = (acs_population - race.white.NHL))
+### (2) Creating an empty data frame, whose columns contains the 'acs_trd_data' columns containing race. or income
+# creates empty data frame
+marion.baseline = data.frame(matrix(ncol = length(colnames(select(acs_trd_data_county_diff_ratios_binary, matches("white|income")))), nrow = 1)) 
+# selects column names matching provided strings -- this can be referred to as specified acs_data columns
+colnames(marion.baseline) = colnames(select(acs_trd_data_county_diff_ratios_binary, matches("white|income")))
+### (3) Defining County Level Baseline Ratios
+### looping through the specified acs_data columns, and calculating the county-level ratios based off by taking the differences between the sum of counts for specific variables (race or income) and dividing the sum of all tract's population
+for (i in colnames(marion.baseline)) {
+  # confirms I am looping through the column names themselves rather than the column index
+  i = i 
+  # populating the i-th column in marion.baseline with the respective i-th column of acs_data divided by the total population of all tracts put together
+  marion.baseline[,i] = (sum(acs_trd_data_county_diff_ratios_binary[,i])/sum(acs_trd_data_county_diff_ratios_binary$acs_population)) 
+}
+
+### (4) Create Tract Level Ratios -- since counts are no longer needed after this point I am over writing the counts to contain ratios
+# loop through column names
+for (i in colnames(marion.baseline)) {
+  # confirms I am looping through the column names themselves rather than the column index
+  i = i
+  
+  # loop through each census tract
+  for (j in 1:nrow(acs_trd_data_county_diff_ratios_binary)) {
+    # confirms I am looping through each row 
+    j = j
+    # updating the (i,j) cells in acs_data by taking the acs_data counts of a given variable divided by the population of that 
+    acs_trd_data_county_diff_ratios_binary[j,i] = (acs_trd_data_county_diff_ratios_binary[j,i] / acs_trd_data_county_diff_ratios_binary[j,"acs_population"]) 
+  }
+}
+
+### (5) Create the Difference Ratios -- keeping the same column names as before however now race and income columns contain ratios
+# the following overwrite the 
+# loop through column names
+for (i in colnames(marion.baseline)) {
+  i = i
+  
+  # loop through each census tract
+  for (j in 1:nrow(acs_trd_data_county_diff_ratios_binary)) {
+    # confirms I am looping through each row 
+    j = j
+    # updating the (i,j) cells in acs_data by taking the acs_data counts of a given variable divided by the population of that 
+    acs_trd_data_county_diff_ratios_binary[j,i] = ( (abs(marion.baseline[,i] - acs_trd_data_county_diff_ratios_binary[j,i])) / marion.baseline[,i])
+  }
+}
+
+```
+
+# Cleaning Health Data
+The PLACES data contains estimated prevalence of a verity of chronic health conditions, and can be found at the following link. (https://chronicdata.cdc.gov/500-Cities-Places/PLACES-Census-Tract-Data-GIS-Friendly-Format-2022-/yjkw-uj5s). This data was found through OHA data. Data was filtered for the specific columns shown below. It should be noted that an **estimated count** can be calculated because each prevalence is reported as a percentage and the data also contains the population for that tract. At this point it would be an approximation count of an estimate but it could still provide a variation of an estimated count, which is required for logisitic regression.
+
+    * Census tract population based of 20
+    * Current smoking among adults aged ≥18 years = CSMOKING_CrudePrev
+    * Chronic obstructive pulmonary disease among adults aged ≥18 years = COPD_CrudePrev
+    * Coronary heart disease among adults aged ≥18 years = CHD_CrudePrev
+    * Current asthma prevalence among adults aged ≥18 years = CASTHMA_CrudePrev
+    * Stroke among adults aged ≥18 years = STROKE_CrudePrev
+    * Depression among adults aged ≥18 years = DEPRESSION_CrudePrev
+
+To create a logistic regression model, I am required to have the raw count of for smoking prevalence. In order to calculate this variables, I multiplied the PLACES tract population, *defined using census bureau 2010 population estimates*, by the smoking prevalence, defined as the ratio between the number of people who stated they smoked and the total number of people who gave a response for that question.
+
+The following chunk preforms the following tasks:
+
+    * redefines a few columns 
+    * select columns illustrated above
+    * creates an empty column 
+    * calculate smoking acount estimate
+  
+```{r Filtering For Health Data From Places, echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+health_filtered = health  %>% 
+  mutate(GEOID = TractFIPS, places_population = TotalPopulation) %>% # rename TractFIPS to make future joins easier 
+  select(GEOID, places_population,
+         # smoking prevalence 
+         CSMOKING_CrudePrev, CSMOKING_Crude95CI, 
+         # chronic obstructive pulmonary disease prevalence
+         COPD_CrudePrev, COPD_Crude95CI, 
+         # chronic heart disease prevalence
+         CHD_CrudePrev, CHD_Crude95CI,
+         # asthma prevalence
+         CASTHMA_CrudePrev, CASTHMA_Crude95CI,
+         # stroke prevalence 
+         STROKE_CrudePrev, STROKE_Crude95CI,
+         # depression prevalence
+         DEPRESSION_CrudePrev, DEPRESSION_Crude95CI) %>% 
+  mutate_at(c(1), as.character) # tract fips was converted to a character because it is going to be treated as an identifyer rather a number we will preform calculation on. This also prevent accidental calculations on the data.
+
+# creating a new column within health_filtered -- this column will hold the smoking count estimates
+health_filtered = health_filtered %>% add_column(smoking_counts = 0)
+
+# creating smoking count estimates
+for (i in 1:nrow(health_filtered)) {
+  # confirms I am looping through each row 
+  i = i
+  # updating the (i,j) cells in health_filtered by multiplying PLACES tract population and smoking prevalence (ratio)
+  decimal =  health_filtered[i,3] / 100 # converting smoking prevalence percent into decimal
+  count = health_filtered[i,2] * decimal # calculate the count by multiplying population by decimal
+  health_filtered[i,ncol(health_filtered)] = round(count, digits = 0) # rounds values to specified number of decimal places -- there may be a rounding issue 
+}
+```
+
+# Joining Everything Together
+The following code will join together 'acs_trd_data', the data frame containing ACS and TRD data, with 'health_filtered', the PLACE health data, in order to create 3 data frames entitled: 'complete_tract_data', 'complete_tract_data_ratios', and 'complete_tract_data_ratios_binary'.
+
+```{r joining acs_tract_data and health_filtered, echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+### Joining Counts (acs_trd_data) with PLACES health data 
+# preform full join between ACS demographic data and Tobacco Retailer Density
+# the raw counts are needed for in order to create a descriptive populations table 
+# this is standard for epidemiology papers 
+complete_tract_data = acs_trd_data %>% 
+  right_join(health_filtered, by = c("GEOID")) %>% 
+  select(-acs_population, -matches("Crude95CI")) %>% 
+  as.data.frame()
+
+write.csv(complete_tract_data, 
+          here("Data", "GenerateData", "complete_tract_data.csv"), 
+          row.names=FALSE)
+
+### Joining Ratio (acs_trd_data_county_diff_ratios) with PLACES health data 
+# preform full join between ACS demographic data and Tobacco Retailer Density
+complete_tract_data_ratios = acs_trd_data_county_diff_ratios %>% 
+  right_join(health_filtered, by = c("GEOID")) %>% 
+  select(GEOID, trd_count, pop.density, smoking_counts, acs_population
+         , places_population, matches("race.|income."), CSMOKING_CrudePrev) %>% 
+  as.data.frame()
+
+write.csv(complete_tract_data_ratios, 
+          here("Data", "GenerateData", "complete_tract_data_ratios.csv"), 
+          row.names=FALSE)
+
+### Joining Ratio (acs_trd_data_county_diff_ratios) with PLACES health data 
+# preform full join between ACS demographic data and Tobacco Retailer Density
+complete_tract_data_ratios_binary = acs_trd_data_county_diff_ratios_binary %>% 
+  right_join(health_filtered, by = c("GEOID")) %>% 
+  select(GEOID, trd_count, pop.density, smoking_counts, acs_population
+         , places_population, race.white.NHL, race.not.white.HL, matches("income."), CSMOKING_CrudePrev) %>% 
+  as.data.frame()
+
+write.csv(complete_tract_data_ratios_binary, 
+          here("Data", "GenerateData", "complete_tract_data_ratios_binary.csv"),
+          row.names=FALSE)
+```
+
+**The following step includes data exploration and 2 phase analysis: descriptive statistics, series of correlation analysis, and logisitic regression.**

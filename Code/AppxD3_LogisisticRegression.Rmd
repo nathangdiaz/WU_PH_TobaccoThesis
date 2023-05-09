@@ -1,0 +1,229 @@
+---
+title: "Appendix D3 - Logistic Regression Models"
+author: "Nathan Garcia-Diaz"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: lumen
+    toc: TRUE
+    toc_float: 
+      toc_collapsed: TRUE
+    toc_depth: 3
+    number_sections: TRUE
+---
+# Packing Preparation and Importing Datasets 
+The following chunk preforms the following tasks:
+
+    * makes a list of packages names needed throughout the document 
+    * loops through the list, and imports each of the packages 
+    * imports the complete_tract_data, complete_tract_data_ratios and complete_tract_data_ratios_binary
+
+```{r preparation, echo = T, results = 'hide', message = FALSE,  warnings=FALSE}
+# the following code exhibits data exploration
+package_lst = c("tidyverse", "gtsummary", "GGally", "broom", "bestglm", "caret", "webshot2", "here") # include other packages for logistic regression and data exploration
+#lapply(package_lst, install.packages, character.only = TRUE)
+lapply(package_lst, library, character.only = TRUE)
+
+# importing data from counts and ratios data
+complete_tract_data = read_csv(here("Data", "GenerateData", "complete_tract_data.csv"))
+complete_tract_data_ratios = read_csv(here("Data", "GenerateData","complete_tract_data_ratios.csv"))
+complete_tract_data_ratios_binary = read_csv(here("Data", "GenerateData","complete_tract_data_ratios_binary.csv"))
+```
+
+# Logistic Regression
+
+The use logistic regression stems from maximize the model's interpretation for non-quantitative co-workers and community members (e.g., implementing principles from the translational science) and to align this project with the current literature, which also uses logistic regression. Logistic regression predict the probability of an event taking place, (i.e., the probability of increased smoking prevalence) when considering additional variables (i.e., Tobacco Retailer Density, American Community Survey demographic variables). The interpretation of logistic regression revolves around understanding two variables. An Odds Ratio (OR), which quantifies association strength between two events. The following example explaining the OR interpretation, will use contextual examples.
+
+    * OR = 1: the odds of TRD are the same in either the presence or absence of the other AdSP, or in other words, TRD has no association to AdSP
+    * OR > 1: TRD and AdSP are correlated, and TRD can be viewed as a risk factor for AdSP, resulting in increased prevalence
+    * OR < 1: TRD and AdSP are correlated, but TRD can be viewed as a protective for AdSP, resulting in decreased prevalence
+
+The strength of a the riskiness or protectiveness of a given variable is determined by how much the OR differs from 1.
+
+It should be noted that OR does not determine causality because the formula for the OR stems from conditional probabilities, which is known as symmetry. The symmetry found within the logistic model's equation means that same result will be the same Tobacco Retailer Density and Adult Cigarette Smoking Prevalence are swapped. The interpretation of the OR is intrinsically tied to the way the reader views the relationship between variables. Ultimately, the logistic regression model only produces a value which describes the relationship between the two variables. 
+
+The statistical relevance of every variable within the model is determined by the p-value. A p-value describes the the probability of observing test results which stem from an inherent relationship between variables rather than due to random chance. The widely accepted threshold for a p-value is 0.05; if a p-value for a given variable is less than this threshold, the variable is considered statistically relevant. If a p-value is considered insignificant (i.e., greater than 0.05), the resulting test results should be attributed to the *noise* found in the data. 
+
+In addition to reporting the p-value, logistic regression reports Confidence Intervals (CI) and Akaike information criterion (AIC). A confidence interval represents the mean of an estimate plus or minus its variation. A 95% confidence interval denotes the range of values expected for the estimate to fall between if the test is redone with 95% confidence. An AIC value represents how well the model explains the data and a lower AIC value is preferred. AIC value only can compare similar models rather than entirely unrelated models. 
+
+When reading the following logistical regression tables, the reader should first examine the p-values to know which variables are statistically significant, and then determine the relationship between the specified variable and Adult Cigarette Smoking Prevalence.
+
+# Logisitic Regression on Raw Counts 
+
+The following code makes the following logistic regression models and tables:
+
+    * Model 1 - Crude Association 
+    * Model 2 - Crude Association with Binary Racial Categories as Variables
+    * Model 3 - Crude Association with Binary Racial Categories and Income Brackets as Variables
+
+```{r round 1 - logistic regression}
+## Model 1 - Crude Association 
+mod1 = glm(cbind(smoking_counts, places_population - smoking_counts) ~ trd_count, data = complete_tract_data, family = binomial)
+
+mod1_table = gtsummary::tbl_regression(mod1, exponentiate = TRUE ) # %>%
+ # gtsummary::add_glance_table(include = c(AIC))
+
+## Logistc Regression Model 2: Model 1 & Racial Demographics
+mod2 = glm(cbind(smoking_counts, places_population - smoking_counts) ~ trd_count + 
+             # population density
+             pop.density +
+             # including racial demographics
+             race.white.NHL + race.black.HL + race.nativeamerican.HL + race.asian.HL + 
+             race.pacificislander.HL + race.hispanic.alone + race.other.HL + race.multiracial.HL 
+           , data = complete_tract_data, family = binomial)
+
+mod2_table = gtsummary::tbl_regression(mod2, exponentiate = TRUE ) #%>%
+  # gtsummary::add_glance_table(include = c(AIC))
+
+## Logistic Regression Model 2: Model 2 & SES Demographics
+mod3 = glm(cbind(smoking_counts, places_population - smoking_counts) ~ trd_count + 
+             # population density
+             pop.density +
+             # including racial demographics
+             race.white.NHL + race.black.HL + race.nativeamerican.HL + race.asian.HL + 
+             race.pacificislander.HL + race.hispanic.alone + race.other.HL + race.multiracial.HL +
+             # including SES demographics
+             income.none + income.less.25k + income.between.25kand49.9k +
+             income.between.50kand74.9k + income.greater.75k
+             , data = complete_tract_data, family = binomial)
+
+mod3_table = gtsummary::tbl_regression(mod3, exponentiate = TRUE ) #%>%
+  # add_glance_table(include = c(AIC))
+```
+
+The following chunk creates the aggregated table with contains all logistic regression models with raw counts. The fact that there are multiple significant Odd Ratios equal to 1 suggest a novel way of looking at the data is required. Therefore additionally supporting the use of a different method of using race and income as variables within the model.
+
+```{r log model 1 - combined graphs}
+tbl_merge_ex1 = gtsummary::tbl_merge(tbls = list(mod1_table, mod2_table, mod3_table),
+                           tab_spanner = c("**Model 1**", "**Model 2**", "**Model 3**")) %>% 
+  gtsummary::as_gt() %>% 
+  gt::tab_header(title = "Table 2. Logisitic Regression Models (Raw Counts)", subtitle = "Marion County, 2020") 
+
+tbl_merge_ex1 %>% 
+  gt::gtsave(filename = here("Outputs", "logistic_regression_rawcounts.png")) # save table as image
+
+tbl_merge_ex1
+```
+
+# Logisitic Regression on Standardized Population Difference Ratios 
+
+The following code preforms some simple data cleaning that will make the Standardized Population Difference Ratios and Standardized Population Difference Ratios with Binary Racial Demographics simpler to code. 
+```{r small data cleaning}
+# initial data cleaning -- removing variables not needed for the following analysis 
+df = complete_tract_data_ratios
+# change the index name to match the GEOID -- this can be arranged so that GEOID can be added back 
+rownames(df) <- df$GEOID
+```
+
+The following code makes the following logistic regression models and tables:
+
+    * Model 1 - Crude Association 
+    * Model 2 - Crude Association with Binary Racial Categories as Variables
+    * Model 3 - Crude Association with Binary Racial Categories and Income Brackets as Variables
+    
+```{r round 2 - logistic regression}
+df = complete_tract_data_ratios
+
+# Logistic Regression Model 1: Crude Association
+mod1 = glm(cbind(smoking_counts, places_population - smoking_counts) ~ trd_count, data = df, family = binomial)
+
+mod1_table = gtsummary::tbl_regression(mod1, exponentiate = TRUE ) # %>%
+  # gtsummary::add_glance_table(include = c(AIC))
+
+## Logistc Regression Model 2: Model 1 & Racial Demographics
+mod2 = glm(cbind(smoking_counts, places_population - smoking_counts) ~ trd_count + 
+             # population density
+             pop.density +
+             # including racial demographics
+             race.white.NHL + race.black.HL + race.nativeamerican.HL + race.asian.HL + 
+             race.pacificislander.HL + race.hispanic.alone + race.other.HL + race.multiracial.HL 
+           , data = df, family = binomial)
+
+mod2_table = gtsummary::tbl_regression(mod2, exponentiate = TRUE ) # %>%
+  # gtsummary::add_glance_table(include = c(AIC))
+
+## Logistic Regression Model 2: Model 2 & SES Demographics
+mod3 = glm(cbind(smoking_counts, places_population - smoking_counts) ~ trd_count + 
+             # population density
+             pop.density +
+             # including racial demographics
+             race.white.NHL + race.black.HL + race.nativeamerican.HL + race.asian.HL + 
+             race.pacificislander.HL + race.hispanic.alone + race.other.HL + race.multiracial.HL +
+             # including SES demographics
+             income.none + income.less.25k + income.between.25kand49.9k +
+             income.between.50kand74.9k + income.greater.75k
+             , data = df, family = binomial)
+
+mod3_table = gtsummary::tbl_regression(mod3, exponentiate = TRUE ) # %>%
+  # add_glance_table(include = c(AIC))
+```
+
+The following chunk creates the aggregated table with contains all of the Logisitic Regression on Standarise Population Difference Ratios.
+
+```{r log model 2 - combined graphs}
+tbl_merge_ex2 = gtsummary::tbl_merge(tbls = list(mod1_table, mod2_table, mod3_table),
+                           tab_spanner = c("**Model 1**", "**Model 2**", "**Model 3**")) %>% 
+  gtsummary::as_gt() %>% 
+  gt::tab_header(title = "Table 2. Logisitic Regression Models (Normalised Scale - County Comparison)", subtitle = "Marion County, 2020")
+
+tbl_merge_ex2 %>% 
+  gt::gtsave(filename = here("Outputs", "logistic_regression_normalised.png")) # save table as image
+
+tbl_merge_ex2
+```
+
+# Logisitic Regression on Binary Standarise Population Difference Ratios
+The following code makes the following logistic regression models and tables:
+
+    * Model 1 - Crude Association 
+    * Model 2 - Crude Association with Binary Racial Categories as Variables
+    * Model 3 - Crude Association with Binary Racial Categories and Income Brackets as Variables
+
+When I presented in SSRD, I the binary categories had interpretable results, however the absence of race.not.white.HL within the following table demonstrates that race.not.white.HL is linearly connected to the other variables, which is demonstrated by the empty line for race.not.white.HL; therefore, adding this variable only makes the model preform worse. **This presented model is invalid.**
+
+```{r round 3 - logistic regression}
+df = complete_tract_data_ratios_binary
+
+## Logistic Regression Model 1: Crude Association
+mod1 = glm(cbind(smoking_counts, places_population - smoking_counts) ~ trd_count, data = df, family = binomial)
+
+mod1_table = gtsummary::tbl_regression(mod1, exponentiate = TRUE ) # %>%
+  # gtsummary::add_glance_table(include = c(AIC))
+
+## Logistic Regression Model 2: Model 1 & Racial Demographics
+mod2 = glm(cbind(smoking_counts, places_population - smoking_counts) ~ trd_count + 
+             # population density
+             pop.density +
+             # including racial demographics
+             race.white.NHL + race.not.white.HL 
+           , data = df, family = binomial)
+
+mod2_table = gtsummary::tbl_regression(mod2, exponentiate = TRUE ) # %>%
+  # gtsummary::add_glance_table(include = c(AIC))
+
+
+## Logistic Regression Model 3: Model 2 & SES Demographics
+mod3 = glm(cbind(smoking_counts, places_population - smoking_counts) ~ trd_count + 
+             # population density
+             pop.density +
+             # including racial demographics
+             race.white.NHL + race.not.white.HL +
+             # including SES demographics
+             income.none + income.less.25k + income.between.25kand49.9k +
+             income.between.50kand74.9k + income.greater.75k
+             , data = df, family = binomial)
+
+mod3_table = gtsummary::tbl_regression(mod3, exponentiate = TRUE ) # %>%
+  # add_glance_table(include = c(AIC))
+```
+
+The following chunk creates the aggregated table with contains all of the Logistic Regression on Binary Standardize Population Difference Ratios. 
+```{r log model 3 - combined graphs}
+tbl_merge_ex3 = gtsummary::tbl_merge(tbls = list(mod1_table, mod2_table, mod3_table),
+                           tab_spanner = c("**Model 1**", "**Model 2**", "**Model 3**")) %>% 
+  gtsummary::as_gt() %>% 
+  gt::tab_header(title = "Table 2. Logisitic Regression Models (Normalised Scale - Binary Racial Data)", subtitle = "Marion County, 2020") 
+
+tbl_merge_ex3
+```
+
